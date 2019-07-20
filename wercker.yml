@@ -1,6 +1,6 @@
 ---
 box:
-  id: dceoy/jupyter:latest
+  id: dceoy/pdbio:latest
   entrypoint: /bin/bash -c
 test:
   steps:

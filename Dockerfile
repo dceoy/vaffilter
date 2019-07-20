@@ -1,4 +1,4 @@
-FROM dceoy/jupyter:latest
+FROM dceoy/pdbio:latest
 
 ADD . /tmp/ifvfilter
 
