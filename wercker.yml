@@ -16,7 +16,7 @@ test:
         name: Test a command
         code: |
           set -x
-          ifvfilter --version
+          vgmmfilter --version
   after-steps:
     - slack-notifier:
         url: $SLACK_URL

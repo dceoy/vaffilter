@@ -1,12 +1,12 @@
 #!/usr/bin/env python
 """
-Infrequent Variant Filter for VCF
+GMM-based Infrequent Variant Filter for VCF data
 
 Usage:
-    ifvfilter [--debug|--info] [--af-cuoff=<float>] [--dp-cutoff=<int>]
-              [--target-pass] [--fig-pdf=<path>] <src> [<dst>]
-    ifvfilter --version
-    ifvfilter -h|--help
+    vgmmfilter [--debug|--info] [--af-cuoff=<float>] [--dp-cutoff=<int>]
+               [--target-pass] [--fig-pdf=<path>] <src> [<dst>]
+    vgmmfilter --version
+    vgmmfilter -h|--help
 
 Options:
     --debug, --info       Execute a command with debug|info messages
@@ -35,7 +35,7 @@ from .vgmm import VariantGMMFilter
 
 
 def main():
-    args = docopt(__doc__, version='ifvfilter {}'.format(__version__))
+    args = docopt(__doc__, version='vgmmfilter {}'.format(__version__))
     _set_log_config(debug=args['--debug'], info=args['--info'])
     logger = logging.getLogger(__name__)
     logger.debug('args:{0}{1}'.format(os.linesep, args))

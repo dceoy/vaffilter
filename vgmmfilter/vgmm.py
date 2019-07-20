@@ -1,6 +1,6 @@
 #!/usr/bin/env python
-"""Infrequent Variant Filter for VCF
-https://github.com/dceoy/ifvfilter
+"""GMM-based Infrequent Variant Filter for VCF data
+https://github.com/dceoy/vgmmfilter
 """
 
 import logging

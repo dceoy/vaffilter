@@ -1,6 +1,6 @@
 FROM dceoy/pdbio:latest
 
-ADD . /tmp/ifvfilter
+ADD . /tmp/vgmmfilter
 
 RUN set -e \
       && apt-get -y update \
@@ -10,7 +10,7 @@ RUN set -e \
       && rm -rf /var/lib/apt/lists/*
 
 RUN set -e \
-      && pip install -U --no-cache-dir pip /tmp/ifvfilter \
-      && rm -rf /tmp/ifvfilter
+      && pip install -U --no-cache-dir pip /tmp/vgmmfilter \
+      && rm -rf /tmp/vgmmfilter
 
 ENTRYPOINT ["jupyter"]

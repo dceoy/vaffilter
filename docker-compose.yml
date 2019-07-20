@@ -2,18 +2,18 @@
 version: '3'
 
 services:
-  ifvfilter:
-    container_name: ifvfilter
+  vgmmfilter:
+    container_name: vgmmfilter
     build:
       context: .
       dockerfile: Dockerfile
-    image: dceoy/ifvfilter:latest
+    image: dceoy/vgmmfilter:latest
     user: ${UID}:${GID}
     userns_mode: host
     volumes:
       - ${PWD}:/nb
     working_dir: /nb
     entrypoint:
-      - ifvfilter
+      - vgmmfilter
     command:
       - --version
