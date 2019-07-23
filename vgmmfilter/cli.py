@@ -67,7 +67,7 @@ def _vgmm_filter(in_vcf_path, out_vcf_path, out_fig_pdf_path=None,
     logger.debug('Execute Variant GMM Filter.')
     vgmmf = VariantGMMFilter(
         af_cutoff=af_cutoff, dp_cutoff=dp_cutoff,
-        target_filters=('PASS' if target_pass else None)
+        target_filtered_variants=('PASS' if target_pass else None)
     )
     vcfdf = vgmmf.run(vcfdf=vcfdf, out_fig_pdf_path=out_fig_pdf_path)
     logger.info('Write a VCF file: {}'.format(out_vcf_path))

@@ -16,43 +16,75 @@ from sklearn.mixture import GaussianMixture
 
 
 class VariantGMMFilter(object):
-    def __init__(self, af_cutoff=0.01, dp_cutoff=100, target_filters=None,
-                 id='VGMM'):
+    def __init__(self, af_cutoff=0.01, dp_cutoff=100,
+                 target_filtered_variants=None, filter_label='VGMM'):
         self.__logger = logging.getLogger(__name__)
         self.__af_co = af_cutoff
         self.__dp_co = dp_cutoff
-        if not target_filters:
-            self.__target_filters = None
-        elif isinstance(target_filters, str):
-            self.__target_filters = {target_filters}
+        if not target_filtered_variants:
+            self.__tfv = None
+        elif isinstance(target_filtered_variants, str):
+            self.__tfv = {target_filtered_variants}
         else:
-            self.__target_filters = set(target_filters)
-        self.__target_filters = target_filters
-        self.__id = id
+            self.__tfv = set(target_filtered_variants)
+        self.__tfv = target_filtered_variants
+        self.__fl = filter_label
 
     def run(self, vcfdf, out_fig_pdf_path=None, covariance_type='full',
             peakout_iter=5):
-        vcf_cols = vcfdf.df.columns
-        axes = ['AF', 'DP', 'INSLEN', 'DELLEN']
-        df_xvcf = vcfdf.expanded_df(
-            df=(
-                vcfdf.df.pipe(
-                    lambda d: d[d['FILTER'].isin(self.__target_filters)]
-                ) if self.__target_filters else vcfdf.df
-            ),
-            by_info=True, by_samples=False, drop=False
-        ).assign(
-            INDELLEN=lambda d: (d['ALT'].apply(len) - d['REF'].apply(len))
-        ).assign(
+        df_vcf = (
+            vcfdf.df.pipe(lambda d: d[d['FILTER'].isin(self.__tfv)])
+            if self.__tfv else vcfdf.df
+        )
+        if df_vcf.size:
+            df_cl = self._cluster_variants(
+                df_xvcf=vcfdf.expanded_df(
+                    df=df_vcf, by_info=True, by_samples=False, drop=False
+                ),
+                covariance_type=covariance_type, peakout_iter=peakout_iter
+            )
+            vcf_cols = vcfdf.df.columns
+            vcfdf.df = vcfdf.df.join(
+                df_cl[['CL_FILTER']], how='left'
+            ).assign(
+                FILTER=lambda d: d['FILTER'].mask(
+                    d['CL_FILTER'] == self.__fl, d['FILTER'] + ';' + self.__fl
+                ).str.replace(r'PASS;', '')
+            )[vcf_cols]
+            self.__logger.info(
+                'VariantGMMFilter filtered out variants: {0} / {1}'.format(
+                    (
+                        df_cl['CL_FILTER'].value_counts().to_dict().get(
+                            self.__fl
+                        ) or 0
+                    ),
+                    df_vcf.shape[0]
+                )
+            )
+            if out_fig_pdf_path:
+                self._draw_fig(df=df_cl, out_fig_path=out_fig_pdf_path)
+            else:
+                pass
+        else:
+            self.__logger.info('No variant targeted for {}.'.format(self.__fl))
+        return vcfdf
+
+    def _cluster_variants(self, df_xvcf, covariance_type='full',
+                          peakout_iter=5):
+        axes = ['AF_M', 'DP', 'INSLEN', 'DELLEN']
+        df_x = df_xvcf.assign(
             AF=lambda d: d['INFO_AF'].astype(float),
             DP=lambda d: d['INFO_DP'].astype(int),
+            INDELLEN=lambda d: (d['ALT'].apply(len) - d['REF'].apply(len))
+        ).assign(
+            AF_M=lambda d: self._beta2m(d['AF']),
             INSLEN=lambda d: d['INDELLEN'].clip(lower=0),
             DELLEN=lambda d: (-d['INDELLEN']).clip(lower=0)
         )
-        self.__logger.debug('df_xvcf:{0}{1}'.format(os.linesep, df_xvcf))
+        self.__logger.debug('df_x:{0}{1}'.format(os.linesep, df_x))
         rvn = ReversibleNormalizer(
-            df=df_xvcf,
-            columns=df_xvcf[axes].pipe(
+            df=df_x,
+            columns=df_x[axes].pipe(
                 lambda d: d.columns[d.nunique() > 1].tolist()
             )
         )
@@ -75,7 +107,7 @@ class VariantGMMFilter(object):
         df_gmm_mu = rvn.denormalize(
             df=pd.DataFrame(best_gmm.means_, columns=x_train.columns)
         ).assign(
-            **{c: df_xvcf[c][0] for c in axes if c not in x_train.columns}
+            **{c: df_x[c][0] for c in axes if c not in x_train.columns}
         )[axes]
         self.__logger.debug('df_gmm_mu:{0}{1}'.format(os.linesep, df_gmm_mu))
         df_cl = rvn.df.assign(
@@ -86,30 +118,22 @@ class VariantGMMFilter(object):
             ),
             on='CL_INT', how='left'
         ).assign(
+            CL_AF=lambda d: self._m2beta(d['CL_AF_M'])
+        ).assign(
             CL_FILTER=lambda d: np.where(
                 ((d['CL_AF'] < self.__af_co) | (d['CL_DP'] < self.__dp_co)),
-                self.__id, d['FILTER']
+                self.__fl, d['FILTER']
             )
         )
-        if out_fig_pdf_path:
-            self._draw_fig(df=df_cl, out_fig_path=out_fig_pdf_path)
-        vcfdf.df = vcfdf.df.join(
-            df_cl[['CL_FILTER']], how='left'
-        ).assign(
-            FILTER=lambda d: d['FILTER'].mask(
-                d['CL_FILTER'] == self.__id, d['FILTER'] + ';' + self.__id
-            ).str.replace(r'PASS;', '')
-        )[vcf_cols]
-        self.__logger.info(
-            'VariantGMMFilter filtered out variants: {0} / {1}'.format(
-                (
-                    df_cl['CL_FILTER'].value_counts().to_dict().get(self.__id)
-                    or 0
-                ),
-                df_xvcf.shape[0]
-            )
-        )
-        return vcfdf
+        return df_cl
+
+    @staticmethod
+    def _beta2m(beta_value):
+        return np.log2(np.divide(beta_value, (1 - beta_value)))
+
+    @staticmethod
+    def _m2beta(m_value):
+        return (lambda x: np.divide(x, (x + 1)))(x=np.power(2, m_value))
 
     def _draw_fig(self, df, out_fig_path):
         self.__logger.info('Draw a fig: {}'.format(out_fig_path))
@@ -117,14 +141,6 @@ class VariantGMMFilter(object):
         sns.set(style='ticks', color_codes=True)
         sns.set_context('paper')
         cl_labs = ['CL_AF', 'CL_DP', 'CL_INSLEN', 'CL_DELLEN']
-        fig_lab_names = {
-            'AF': 'Allele frequency (AF)', 'DP': 'Total read depth (DP)',
-            'CL': 'Cluster [{}]'.format(', '.join(cl_labs).replace('CL_', '')),
-            'VT': 'Variant Type'
-        }
-        sns.set_palette(
-            palette='GnBu_d', n_colors=df[cl_labs].drop_duplicates().shape[0]
-        )
         df_fig = df.sort_values(['INSLEN', 'DELLEN']).sort_values(
             'CL_AF', ascending=False
         ).assign(
@@ -136,11 +152,18 @@ class VariantGMMFilter(object):
                 d['INSLEN'] > d['DELLEN'], 'Insertion',
                 np.where(d['DELLEN'] > d['INSLEN'], 'Deletion', 'Substitution')
             )
-        ).rename(columns=fig_lab_names)[fig_lab_names.values()]
+        )
+        fig_lab_names = {
+            'AF': 'Allele frequency (AF)', 'DP': 'Total read depth (DP)',
+            'CL': 'Cluster [{}]'.format(', '.join(cl_labs).replace('CL_', '')),
+            'VT': 'Variant Type'
+        }
+        sns.set_palette(palette='GnBu_d', n_colors=df_fig['CL'].nunique())
         self.__logger.debug('df_fig:{0}{1}'.format(os.linesep, df_fig))
         _ = sns.scatterplot(
             x=fig_lab_names['DP'], y=fig_lab_names['AF'],
-            style=fig_lab_names['VT'], hue=fig_lab_names['CL'], data=df_fig,
+            style=fig_lab_names['VT'], hue=fig_lab_names['CL'],
+            data=df_fig.rename(columns=fig_lab_names)[fig_lab_names.values()],
             style_order=['Substitution', 'Deletion', 'Insertion'],
             alpha=0.8, edgecolor='none', legend='full'
         )
