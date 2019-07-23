@@ -16,18 +16,18 @@ from sklearn.mixture import GaussianMixture
 
 
 class VariantGMMFilter(object):
-    def __init__(self, af_cutoff=0.01, dp_cutoff=100,
+    def __init__(self, af_cutoff=0.01, dp_cutoff=100, alpha_for_mvalue=1,
                  target_filtered_variants=None, filter_label='VGMM'):
         self.__logger = logging.getLogger(__name__)
         self.__af_co = af_cutoff
         self.__dp_co = dp_cutoff
+        self.__a4m = alpha_for_mvalue
         if not target_filtered_variants:
             self.__tfv = None
         elif isinstance(target_filtered_variants, str):
             self.__tfv = {target_filtered_variants}
         else:
             self.__tfv = set(target_filtered_variants)
-        self.__tfv = target_filtered_variants
         self.__fl = filter_label
 
     def run(self, vcfdf, out_fig_pdf_path=None, covariance_type='full',
@@ -77,7 +77,9 @@ class VariantGMMFilter(object):
             DP=lambda d: d['INFO_DP'].astype(int),
             INDELLEN=lambda d: (d['ALT'].apply(len) - d['REF'].apply(len))
         ).assign(
-            AF_M=lambda d: self._beta2m(d['AF']),
+            AF_M=lambda d: self._af2mvalue(
+                af=d['AF'], dp=d['DP'], alpha=self.__a4m
+            ),
             INSLEN=lambda d: d['INDELLEN'].clip(lower=0),
             DELLEN=lambda d: (-d['INDELLEN']).clip(lower=0)
         )
@@ -107,7 +109,7 @@ class VariantGMMFilter(object):
         df_gmm_mu = rvn.denormalize(
             df=pd.DataFrame(best_gmm.means_, columns=x_train.columns)
         ).assign(
-            **{c: df_x[c][0] for c in axes if c not in x_train.columns}
+            **{c: df_x[c].iloc[0] for c in axes if c not in x_train.columns}
         )[axes]
         self.__logger.debug('df_gmm_mu:{0}{1}'.format(os.linesep, df_gmm_mu))
         df_cl = rvn.df.assign(
@@ -118,7 +120,9 @@ class VariantGMMFilter(object):
             ),
             on='CL_INT', how='left'
         ).assign(
-            CL_AF=lambda d: self._m2beta(d['CL_AF_M'])
+            CL_AF=lambda d: self._mvalue2af(
+                mvalue=d['CL_AF_M'], dp=d['CL_DP'], alpha=self.__a4m
+            )
         ).assign(
             CL_FILTER=lambda d: np.where(
                 ((d['CL_AF'] < self.__af_co) | (d['CL_DP'] < self.__dp_co)),
@@ -128,12 +132,14 @@ class VariantGMMFilter(object):
         return df_cl
 
     @staticmethod
-    def _beta2m(beta_value):
-        return np.log2(np.divide(beta_value, (1 - beta_value)))
+    def _af2mvalue(af, dp, alpha=0):
+        return np.log2(np.divide((af * dp + alpha), ((1 - af) * dp + alpha)))
 
     @staticmethod
-    def _m2beta(m_value):
-        return (lambda x: np.divide(x, (x + 1)))(x=np.power(2, m_value))
+    def _mvalue2af(mvalue, dp, alpha=0):
+        return (
+            lambda x: np.divide(((x * dp) - ((x - 1) * alpha)), ((x + 1) * dp))
+        )(x=np.power(2, mvalue))
 
     def _draw_fig(self, df, out_fig_path):
         self.__logger.info('Draw a fig: {}'.format(out_fig_path))

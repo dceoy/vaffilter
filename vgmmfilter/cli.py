@@ -27,6 +27,7 @@ import os
 import signal
 
 from docopt import docopt
+
 from pdbio.vcfdataframe import VcfDataFrame
 
 from . import __version__
@@ -59,7 +60,8 @@ def _set_log_config(debug=None, info=None):
 
 
 def _vgmm_filter(in_vcf_path, out_vcf_path, out_fig_pdf_path=None,
-                 af_cutoff=0.01, dp_cutoff=100, target_pass=False):
+                 af_cutoff=0.01, dp_cutoff=100, target_pass=False,
+                 alpha_for_mvalue=1):
     logger = logging.getLogger(__name__)
     logger.info('Execute VariantGMMFilter: {}'.format(in_vcf_path))
     signal.signal(signal.SIGINT, signal.SIG_DFL)
@@ -67,6 +69,7 @@ def _vgmm_filter(in_vcf_path, out_vcf_path, out_fig_pdf_path=None,
     logger.debug('Execute Variant GMM Filter.')
     vgmmf = VariantGMMFilter(
         af_cutoff=af_cutoff, dp_cutoff=dp_cutoff,
+        alpha_for_mvalue=alpha_for_mvalue,
         target_filtered_variants=('PASS' if target_pass else None)
     )
     vcfdf = vgmmf.run(vcfdf=vcfdf, out_fig_pdf_path=out_fig_pdf_path)
