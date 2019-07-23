@@ -27,7 +27,6 @@ import os
 import signal
 
 from docopt import docopt
-
 from pdbio.vcfdataframe import VcfDataFrame
 
 from . import __version__
