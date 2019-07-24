@@ -3,14 +3,15 @@
 GMM-based Infrequent Variant Filter for VCF data
 
 Usage:
-    vgmmfilter [--debug|--info] [--altdp-cutoff=<int>] [--target-pass]
-               [--fig-pdf=<path>] <src> [<dst>]
+    vgmmfilter [--debug|--info] [--af-cutoff=<int>] [--altdp-cutoff=<int>]
+               [--target-pass] [--fig-pdf=<path>] <src> [<dst>]
     vgmmfilter --version
     vgmmfilter -h|--help
 
 Options:
     --debug, --info       Execute a command with debug|info messages
-    --altdp-cutoff=<int>  Set ALT depth cutoff for GMM clusters [default: 10]
+    --af-cutoff=<float>   Set AF cutoff for GMM clusters [default: 0.02]
+    --altdp-cutoff=<int>  Set ALT depth cutoff for GMM clusters [default: 8]
     --target-pass         Target only passing variants in a VCF file
     --fig-pdf=<path>      Write a figure into a PDF file
     --version             Print version and exit
@@ -39,7 +40,7 @@ def main():
     logger.debug('args:{0}{1}'.format(os.linesep, args))
     _vgmm_filter(
         in_vcf_path=args['<src>'], out_vcf_path=args['<dst>'],
-        out_fig_pdf_path=args['--fig-pdf'],
+        out_fig_pdf_path=args['--fig-pdf'], af_cutoff=args['--af-cutoff'],
         altdp_cutoff=args['--altdp-cutoff'],
         target_pass=args['--target-pass']
     )
@@ -58,15 +59,15 @@ def _set_log_config(debug=None, info=None):
     )
 
 
-def _vgmm_filter(in_vcf_path, out_vcf_path, out_fig_pdf_path=None,
-                 altdp_cutoff=10, target_pass=False):
+def _vgmm_filter(in_vcf_path, out_vcf_path, out_fig_pdf_path, af_cutoff,
+                 altdp_cutoff, target_pass):
     logger = logging.getLogger(__name__)
     logger.info('Execute VariantGMMFilter: {}'.format(in_vcf_path))
     signal.signal(signal.SIGINT, signal.SIG_DFL)
     vcfdf = VcfDataFrame(path=in_vcf_path)
     logger.debug('Execute Variant GMM Filter.')
     vgmmf = VariantGMMFilter(
-        altdp_cutoff=float(altdp_cutoff),
+        af_cutoff=float(af_cutoff), altdp_cutoff=float(altdp_cutoff),
         target_filtered_variants=('PASS' if target_pass else None)
     )
     vcfdf = vgmmf.run(vcfdf=vcfdf, out_fig_pdf_path=out_fig_pdf_path)

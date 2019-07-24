@@ -16,10 +16,11 @@ from sklearn.mixture import GaussianMixture
 
 
 class VariantGMMFilter(object):
-    def __init__(self, altdp_cutoff=10, alpha_for_mvalue=0.01,
+    def __init__(self, af_cutoff=0.02, altdp_cutoff=10, alpha_for_mvalue=1e-2,
                  target_filtered_variants=None, filter_label='VGMM'):
         self.__logger = logging.getLogger(__name__)
-        self.__altdp_co = altdp_cutoff
+        self.__cos = {'AF': af_cutoff, 'ALTDP': altdp_cutoff}
+        self.__logger.debug('self.__cos: {}'.format(self.__cos))
         self.__a4m = alpha_for_mvalue
         if not target_filtered_variants:
             self.__tfv = None
@@ -31,6 +32,7 @@ class VariantGMMFilter(object):
 
     def run(self, vcfdf, out_fig_pdf_path=None, covariance_type='full',
             peakout_iter=5):
+        self._validate_df_vcf(df=vcfdf.df)
         df_vcf = (
             vcfdf.df.pipe(lambda d: d[d['FILTER'].isin(self.__tfv)])
             if self.__tfv else vcfdf.df
@@ -68,9 +70,17 @@ class VariantGMMFilter(object):
             self.__logger.info('No variant targeted for {}.'.format(self.__fl))
         return vcfdf
 
-    def _cluster_variants(self, df_xvcf, covariance_type='full',
-                          peakout_iter=5):
-        axes = ['M_AF', 'LOG_DP', 'LOG_INSLEN', 'LOG_DELLEN']
+    @staticmethod
+    def _validate_df_vcf(df):
+        ra = df[['REF', 'ALT']].apply(lambda r: ''.join(r), axis=1)
+        if ra[ra.str.contains(',')].size:
+            raise ValueError('multiple allele pattern is not supported.')
+        elif ra[ra.str.contains(r'[^a-zA-Z]')].size:
+            raise ValueError('invalid allele pattern')
+
+    def _cluster_variants(self, df_xvcf, covariance_type='full', tol=1e-4,
+                          max_iter=1000, peakout_iter=5):
+        axes = ['M_AF', 'LOG2_DP', 'LOG2_INSLEN', 'LOG2_DELLEN']
         df_x = df_xvcf.assign(
             AF=lambda d: d['INFO_AF'].astype(float),
             DP=lambda d: d['INFO_DP'].astype(int),
@@ -83,9 +93,9 @@ class VariantGMMFilter(object):
             M_AF=lambda d: self._af2mvalue(
                 af=d['AF'], dp=d['DP'], alpha=self.__a4m
             ),
-            LOG_DP=lambda d: np.log2(d['DP'] + 1),
-            LOG_INSLEN=lambda d: np.log2(d['INSLEN'] + 1),
-            LOG_DELLEN=lambda d: np.log2(d['DELLEN'] + 1)
+            LOG2_DP=lambda d: np.log2(d['DP'] + 1),
+            LOG2_INSLEN=lambda d: np.log2(d['INSLEN'] + 1),
+            LOG2_DELLEN=lambda d: np.log2(d['DELLEN'] + 1)
         )
         self.__logger.debug('df_x:{0}{1}'.format(os.linesep, df_x))
         rvn = ReversibleNormalizer(
@@ -99,7 +109,8 @@ class VariantGMMFilter(object):
         best_gmm_dict = dict()
         for k in range(1, x_train.shape[0]):
             gmm = GaussianMixture(
-                n_components=k, covariance_type=covariance_type
+                n_components=k, covariance_type=covariance_type,
+                max_iter=max_iter
             )
             gmm.fit(X=x_train)
             bic = gmm.bic(X=x_train)
@@ -124,9 +135,9 @@ class VariantGMMFilter(object):
             ),
             on='CL_INT', how='left'
         ).assign(
-            CL_DP=lambda d: (np.exp2(d['CL_LOG_DP']) - 1),
-            CL_INSLEN=lambda d: (np.exp2(d['CL_LOG_INSLEN']) - 1),
-            CL_DELLEN=lambda d: (np.exp2(d['CL_LOG_DELLEN']) - 1)
+            CL_DP=lambda d: (np.exp2(d['CL_LOG2_DP']) - 1),
+            CL_INSLEN=lambda d: (np.exp2(d['CL_LOG2_INSLEN']) - 1),
+            CL_DELLEN=lambda d: (np.exp2(d['CL_LOG2_DELLEN']) - 1)
         ).assign(
             CL_AF=lambda d: self._mvalue2af(
                 mvalue=d['CL_M_AF'], dp=d['CL_DP'], alpha=self.__a4m
@@ -135,7 +146,11 @@ class VariantGMMFilter(object):
             CL_ALTDP=lambda d: (d['CL_AF'] * d['CL_DP']),
         ).assign(
             CL_FILTER=lambda d: np.where(
-                d['CL_ALTDP'] < self.__altdp_co, self.__fl, d['FILTER']
+                (
+                    (d['CL_AF'] < self.__cos['AF'])
+                    | (d['CL_ALTDP'] < self.__altdp_co['ALTDP'])
+                ),
+                self.__fl, d['FILTER']
             )
         )
         return df_cl
@@ -156,7 +171,7 @@ class VariantGMMFilter(object):
         sns.set(style='ticks', color_codes=True)
         sns.set_context('paper')
         df_fig = df.sort_values(
-            'CL_ALTDP', ascending=False
+            'CL_AF', ascending=False
         ).assign(
             CL=lambda d: d[[
                 'CL_ALTDP', 'CL_DP', 'CL_AF', 'CL_INSLEN', 'CL_DELLEN'
