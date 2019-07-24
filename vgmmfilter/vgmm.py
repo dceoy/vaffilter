@@ -16,7 +16,7 @@ from sklearn.mixture import GaussianMixture
 
 
 class VariantGMMFilter(object):
-    def __init__(self, af_cutoff=0.01, dp_cutoff=100, alpha_for_mvalue=1,
+    def __init__(self, af_cutoff=0.01, dp_cutoff=100, alpha_for_mvalue=0.001,
                  target_filtered_variants=None, filter_label='VGMM'):
         self.__logger = logging.getLogger(__name__)
         self.__af_co = af_cutoff
@@ -71,17 +71,20 @@ class VariantGMMFilter(object):
 
     def _cluster_variants(self, df_xvcf, covariance_type='full',
                           peakout_iter=5):
-        axes = ['AF_M', 'DP', 'INSLEN', 'DELLEN']
+        axes = ['M_AF', 'DP', 'LOG2_INSLEN', 'LOG2_DELLEN']
         df_x = df_xvcf.assign(
             AF=lambda d: d['INFO_AF'].astype(float),
             DP=lambda d: d['INFO_DP'].astype(int),
             INDELLEN=lambda d: (d['ALT'].apply(len) - d['REF'].apply(len))
         ).assign(
-            AF_M=lambda d: self._af2mvalue(
+            M_AF=lambda d: self._af2mvalue(
                 af=d['AF'], dp=d['DP'], alpha=self.__a4m
             ),
             INSLEN=lambda d: d['INDELLEN'].clip(lower=0),
             DELLEN=lambda d: (-d['INDELLEN']).clip(lower=0)
+        ).assign(
+            LOG2_INSLEN=lambda d: np.log2(d['INSLEN'] + 1),
+            LOG2_DELLEN=lambda d: np.log2(d['DELLEN'] + 1)
         )
         self.__logger.debug('df_x:{0}{1}'.format(os.linesep, df_x))
         rvn = ReversibleNormalizer(
@@ -121,8 +124,10 @@ class VariantGMMFilter(object):
             on='CL_INT', how='left'
         ).assign(
             CL_AF=lambda d: self._mvalue2af(
-                mvalue=d['CL_AF_M'], dp=d['CL_DP'], alpha=self.__a4m
-            )
+                mvalue=d['CL_M_AF'], dp=d['CL_DP'], alpha=self.__a4m
+            ),
+            CL_INSLEN=lambda d: (np.exp2(d['LOG2_INSLEN']) - 1),
+            CL_DELLEN=lambda d: (np.exp2(d['LOG2_DELLEN']) - 1)
         ).assign(
             CL_FILTER=lambda d: np.where(
                 ((d['CL_AF'] < self.__af_co) | (d['CL_DP'] < self.__dp_co)),
@@ -139,7 +144,7 @@ class VariantGMMFilter(object):
     def _mvalue2af(mvalue, dp, alpha=0):
         return (
             lambda x: np.divide(((x * dp) - ((x - 1) * alpha)), ((x + 1) * dp))
-        )(x=np.power(2, mvalue))
+        )(x=np.exp2(mvalue))
 
     def _draw_fig(self, df, out_fig_path):
         self.__logger.info('Draw a fig: {}'.format(out_fig_path))
@@ -166,7 +171,7 @@ class VariantGMMFilter(object):
         }
         sns.set_palette(palette='GnBu_d', n_colors=df_fig['CL'].nunique())
         self.__logger.debug('df_fig:{0}{1}'.format(os.linesep, df_fig))
-        _ = sns.scatterplot(
+        sns.scatterplot(
             x=fig_lab_names['DP'], y=fig_lab_names['AF'],
             style=fig_lab_names['VT'], hue=fig_lab_names['CL'],
             data=df_fig.rename(columns=fig_lab_names)[fig_lab_names.values()],
