@@ -4,7 +4,7 @@ GMM-based Infrequent Variant Filter for VCF data
 
 Usage:
     vgmmfilter [--debug|--info] [--af-cutoff=<int>] [--altdp-cutoff=<int>]
-               [--target-pass] [--fig-pdf=<path>] <src> [<dst>]
+               [--target-pass] [--seed=<int>] [--fig-pdf=<path>] <src> [<dst>]
     vgmmfilter --version
     vgmmfilter -h|--help
 
@@ -13,6 +13,7 @@ Options:
     --af-cutoff=<float>   Set AF cutoff for GMM clusters [default: 0.02]
     --altdp-cutoff=<int>  Set ALT depth cutoff for GMM clusters [default: 8]
     --target-pass         Target only passing variants in a VCF file
+    --seed=<int>          Set random seed
     --fig-pdf=<path>      Write a figure into a PDF file
     --version             Print version and exit
     -h, --help            Print help and exit
@@ -26,6 +27,7 @@ import logging
 import os
 import signal
 
+import numpy as np
 from docopt import docopt
 from pdbio.vcfdataframe import VcfDataFrame
 
@@ -38,6 +40,8 @@ def main():
     _set_log_config(debug=args['--debug'], info=args['--info'])
     logger = logging.getLogger(__name__)
     logger.debug('args:{0}{1}'.format(os.linesep, args))
+    if args['--seed']:
+        np.random.seed(seed=int(args['--seed']))
     _vgmm_filter(
         in_vcf_path=args['<src>'], out_vcf_path=args['<dst>'],
         out_fig_pdf_path=args['--fig-pdf'], af_cutoff=args['--af-cutoff'],

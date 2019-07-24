@@ -148,7 +148,7 @@ class VariantGMMFilter(object):
             CL_FILTER=lambda d: np.where(
                 (
                     (d['CL_AF'] < self.__cos['AF'])
-                    | (d['CL_ALTDP'] < self.__altdp_co['ALTDP'])
+                    | (d['CL_ALTDP'] < self.__cos['ALTDP'])
                 ),
                 self.__fl, d['FILTER']
             )
@@ -167,7 +167,7 @@ class VariantGMMFilter(object):
 
     def _draw_fig(self, df, out_fig_path):
         self.__logger.info('Draw a fig: {}'.format(out_fig_path))
-        rcParams['figure.figsize'] = (14.85, 10.5)  # A4 aspect: (297x210)
+        rcParams['figure.figsize'] = (11.88, 8.40)  # A4 aspect: (297x210)
         sns.set(style='ticks', color_codes=True)
         sns.set_context('paper')
         df_fig = df.sort_values(
@@ -207,13 +207,18 @@ class VariantGMMFilter(object):
                 CL=lambda d: d['CL'].apply(lambda k: cl_labels[k]),
                 VT=lambda d: d['VT'].apply(lambda k: vt_labels[k])
             ).rename(columns=fig_lab_names)[fig_lab_names.values()],
-            style_order=[
-                vt_labels[k] for k in ['Substitution', 'Deletion', 'Insertion']
-            ],
+            markers={
+                vt_labels[k]: v for k, v in {
+                    'Substitution': '.', 'Deletion': '>', 'Insertion': '<'
+                }.items() if k in vt_labels
+            },
             alpha=0.8, edgecolor='none', legend='full'
         )
         ax.set_xscale('log')
         ax.set_title('Variant GMM Clusters')
+        ax.legend(loc='center left', bbox_to_anchor=(1, 0.5), ncol=1)
+        axp = ax.get_position()
+        ax.set_position([axp.x0, axp.y0, axp.width * 0.75, axp.height])
         plt.savefig(out_fig_path)
 
 
