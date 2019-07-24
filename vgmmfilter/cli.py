@@ -3,15 +3,14 @@
 GMM-based Infrequent Variant Filter for VCF data
 
 Usage:
-    vgmmfilter [--debug|--info] [--af-cuoff=<float>] [--dp-cutoff=<int>]
-               [--target-pass] [--fig-pdf=<path>] <src> [<dst>]
+    vgmmfilter [--debug|--info] [--altdp-cutoff=<int>] [--target-pass]
+               [--fig-pdf=<path>] <src> [<dst>]
     vgmmfilter --version
     vgmmfilter -h|--help
 
 Options:
     --debug, --info       Execute a command with debug|info messages
-    --af-cutoff=<float>   Set AF cutoff for estimated clusters [default: 0.01]
-    --dp-cutoff=<int>     Set DP cutoff for estimated clusters [default: 100]
+    --altdp-cutoff=<int>  Set ALT depth cutoff for GMM clusters [default: 10]
     --target-pass         Target only passing variants in a VCF file
     --fig-pdf=<path>      Write a figure into a PDF file
     --version             Print version and exit
@@ -27,7 +26,6 @@ import os
 import signal
 
 from docopt import docopt
-
 from pdbio.vcfdataframe import VcfDataFrame
 
 from . import __version__
@@ -41,8 +39,9 @@ def main():
     logger.debug('args:{0}{1}'.format(os.linesep, args))
     _vgmm_filter(
         in_vcf_path=args['<src>'], out_vcf_path=args['<dst>'],
-        out_fig_pdf_path=args['--fig-pdf'], af_cutoff=args['--af-cuoff'],
-        dp_cutoff=args['--dp-cuoff'], target_pass=args['--target-pass']
+        out_fig_pdf_path=args['--fig-pdf'],
+        altdp_cutoff=args['--altdp-cutoff'],
+        target_pass=args['--target-pass']
     )
 
 
@@ -60,16 +59,14 @@ def _set_log_config(debug=None, info=None):
 
 
 def _vgmm_filter(in_vcf_path, out_vcf_path, out_fig_pdf_path=None,
-                 af_cutoff=0.01, dp_cutoff=100, target_pass=False,
-                 alpha_for_mvalue=1):
+                 altdp_cutoff=10, target_pass=False):
     logger = logging.getLogger(__name__)
     logger.info('Execute VariantGMMFilter: {}'.format(in_vcf_path))
     signal.signal(signal.SIGINT, signal.SIG_DFL)
     vcfdf = VcfDataFrame(path=in_vcf_path)
     logger.debug('Execute Variant GMM Filter.')
     vgmmf = VariantGMMFilter(
-        af_cutoff=af_cutoff, dp_cutoff=dp_cutoff,
-        alpha_for_mvalue=alpha_for_mvalue,
+        altdp_cutoff=float(altdp_cutoff),
         target_filtered_variants=('PASS' if target_pass else None)
     )
     vcfdf = vgmmf.run(vcfdf=vcfdf, out_fig_pdf_path=out_fig_pdf_path)

@@ -16,11 +16,10 @@ from sklearn.mixture import GaussianMixture
 
 
 class VariantGMMFilter(object):
-    def __init__(self, af_cutoff=0.01, dp_cutoff=100, alpha_for_mvalue=0.001,
+    def __init__(self, altdp_cutoff=10, alpha_for_mvalue=0.01,
                  target_filtered_variants=None, filter_label='VGMM'):
         self.__logger = logging.getLogger(__name__)
-        self.__af_co = af_cutoff
-        self.__dp_co = dp_cutoff
+        self.__altdp_co = altdp_cutoff
         self.__a4m = alpha_for_mvalue
         if not target_filtered_variants:
             self.__tfv = None
@@ -71,20 +70,22 @@ class VariantGMMFilter(object):
 
     def _cluster_variants(self, df_xvcf, covariance_type='full',
                           peakout_iter=5):
-        axes = ['M_AF', 'DP', 'LOG2_INSLEN', 'LOG2_DELLEN']
+        axes = ['M_AF', 'LOG_DP', 'LOG_INSLEN', 'LOG_DELLEN']
         df_x = df_xvcf.assign(
             AF=lambda d: d['INFO_AF'].astype(float),
             DP=lambda d: d['INFO_DP'].astype(int),
             INDELLEN=lambda d: (d['ALT'].apply(len) - d['REF'].apply(len))
         ).assign(
-            M_AF=lambda d: self._af2mvalue(
-                af=d['AF'], dp=d['DP'], alpha=self.__a4m
-            ),
+            ALTDP=lambda d: (d['AF'] * d['DP']),
             INSLEN=lambda d: d['INDELLEN'].clip(lower=0),
             DELLEN=lambda d: (-d['INDELLEN']).clip(lower=0)
         ).assign(
-            LOG2_INSLEN=lambda d: np.log2(d['INSLEN'] + 1),
-            LOG2_DELLEN=lambda d: np.log2(d['DELLEN'] + 1)
+            M_AF=lambda d: self._af2mvalue(
+                af=d['AF'], dp=d['DP'], alpha=self.__a4m
+            ),
+            LOG_DP=lambda d: np.log2(d['DP'] + 1),
+            LOG_INSLEN=lambda d: np.log2(d['INSLEN'] + 1),
+            LOG_DELLEN=lambda d: np.log2(d['DELLEN'] + 1)
         )
         self.__logger.debug('df_x:{0}{1}'.format(os.linesep, df_x))
         rvn = ReversibleNormalizer(
@@ -123,15 +124,18 @@ class VariantGMMFilter(object):
             ),
             on='CL_INT', how='left'
         ).assign(
+            CL_DP=lambda d: (np.exp2(d['CL_LOG_DP']) - 1),
+            CL_INSLEN=lambda d: (np.exp2(d['CL_LOG_INSLEN']) - 1),
+            CL_DELLEN=lambda d: (np.exp2(d['CL_LOG_DELLEN']) - 1)
+        ).assign(
             CL_AF=lambda d: self._mvalue2af(
                 mvalue=d['CL_M_AF'], dp=d['CL_DP'], alpha=self.__a4m
-            ),
-            CL_INSLEN=lambda d: (np.exp2(d['LOG2_INSLEN']) - 1),
-            CL_DELLEN=lambda d: (np.exp2(d['LOG2_DELLEN']) - 1)
+            )
+        ).assign(
+            CL_ALTDP=lambda d: (d['CL_AF'] * d['CL_DP']),
         ).assign(
             CL_FILTER=lambda d: np.where(
-                ((d['CL_AF'] < self.__af_co) | (d['CL_DP'] < self.__dp_co)),
-                self.__fl, d['FILTER']
+                d['CL_ALTDP'] < self.__altdp_co, self.__fl, d['FILTER']
             )
         )
         return df_cl
@@ -148,37 +152,53 @@ class VariantGMMFilter(object):
 
     def _draw_fig(self, df, out_fig_path):
         self.__logger.info('Draw a fig: {}'.format(out_fig_path))
-        rcParams['figure.figsize'] = (14, 10)
+        rcParams['figure.figsize'] = (14.85, 10.5)  # A4 aspect: (297x210)
         sns.set(style='ticks', color_codes=True)
         sns.set_context('paper')
-        cl_labs = ['CL_AF', 'CL_DP', 'CL_INSLEN', 'CL_DELLEN']
-        df_fig = df.sort_values(['INSLEN', 'DELLEN']).sort_values(
-            'CL_AF', ascending=False
+        df_fig = df.sort_values(
+            'CL_ALTDP', ascending=False
         ).assign(
-            CL=lambda d: d[cl_labs].apply(
-                lambda r: '[{0:.3f}, {1:.0f}, {2:.3f}. {3:.3f}]'.format(*r),
+            CL=lambda d: d[[
+                'CL_ALTDP', 'CL_DP', 'CL_AF', 'CL_INSLEN', 'CL_DELLEN'
+            ]].apply(
+                lambda r:
+                '[{0:.1f}/{1:.1f}, {2:.4f}, {3:.2f}, {4:.2f}]'.format(*r),
                 axis=1
             ),
             VT=lambda d: np.where(
-                d['INSLEN'] > d['DELLEN'], 'Insertion',
-                np.where(d['DELLEN'] > d['INSLEN'], 'Deletion', 'Substitution')
+                d['INDELLEN'] > 0, 'Insertion',
+                np.where(d['INDELLEN'] < 0, 'Deletion', 'Substitution')
             )
         )
+        cl_labels = {
+            k: '{0}\t(x{1})'.format(k, v)
+            for k, v in df_fig['CL'].value_counts().to_dict().items()
+        }
+        vt_labels = {
+            k: '{0}\t(x{1})'.format(k, v)
+            for k, v in df_fig['VT'].value_counts().to_dict().items()
+        }
         fig_lab_names = {
-            'AF': 'Allele frequency (AF)', 'DP': 'Total read depth (DP)',
-            'CL': 'Cluster [{}]'.format(', '.join(cl_labs).replace('CL_', '')),
+            'AF': 'ALT allele frequency (AF)', 'DP': 'Total read depth (DP)',
+            'CL': 'Estimated cluster [ALT/DP, AF, INS, DEL]',
             'VT': 'Variant Type'
         }
         sns.set_palette(palette='GnBu_d', n_colors=df_fig['CL'].nunique())
         self.__logger.debug('df_fig:{0}{1}'.format(os.linesep, df_fig))
-        sns.scatterplot(
+        ax = sns.scatterplot(
             x=fig_lab_names['DP'], y=fig_lab_names['AF'],
             style=fig_lab_names['VT'], hue=fig_lab_names['CL'],
-            data=df_fig.rename(columns=fig_lab_names)[fig_lab_names.values()],
-            style_order=['Substitution', 'Deletion', 'Insertion'],
+            data=df_fig.assign(
+                CL=lambda d: d['CL'].apply(lambda k: cl_labels[k]),
+                VT=lambda d: d['VT'].apply(lambda k: vt_labels[k])
+            ).rename(columns=fig_lab_names)[fig_lab_names.values()],
+            style_order=[
+                vt_labels[k] for k in ['Substitution', 'Deletion', 'Insertion']
+            ],
             alpha=0.8, edgecolor='none', legend='full'
         )
-        plt.title('Variant GMM Clusters')
+        ax.set_xscale('log')
+        ax.set_title('Variant GMM Clusters')
         plt.savefig(out_fig_path)
 
 

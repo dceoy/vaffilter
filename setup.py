@@ -18,7 +18,7 @@ setup(
     author_email='dnarsil+github@gmail.com',
     url='https://github.com/dceoy/vgmmfilter',
     include_package_data=True,
-    install_requires=['docopt', 'pandas'],
+    install_requires=['docopt', 'pandas', 'scikit-learn', 'seaborn'],
     entry_points={
         'console_scripts': ['vgmmfilter=vgmmfilter.cli:main'],
     },
