@@ -6,10 +6,9 @@ https://github.com/dceoy/vgmmfilter
 import logging
 import os
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-
-import matplotlib.pyplot as plt
 import seaborn as sns
 from matplotlib.pylab import rcParams
 from sklearn.mixture import GaussianMixture
@@ -109,7 +108,7 @@ class VariantGMMFilter(object):
         best_gmm_dict = dict()
         for k in range(1, x_train.shape[0]):
             gmm = GaussianMixture(
-                n_components=k, covariance_type=covariance_type,
+                n_components=k, covariance_type=covariance_type, tol=tol,
                 max_iter=max_iter
             )
             gmm.fit(X=x_train)
