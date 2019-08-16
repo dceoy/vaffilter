@@ -26,6 +26,7 @@ class VariantGMMFilter(object):
         elif isinstance(target_filtered_variants, str):
             self.__tfv = {target_filtered_variants}
         else:
+            assert isinstance(target_filtered_variants, (list, tuple, set))
             self.__tfv = set(target_filtered_variants)
         self.__fl = filter_label
 
@@ -43,13 +44,12 @@ class VariantGMMFilter(object):
                 ),
                 covariance_type=covariance_type, peakout_iter=peakout_iter
             )
-            vcf_cols = vcfdf.df.columns
-            vcfdf.df = vcfdf.df.join(
-                df_cl[['CL_FILTER']], how='left'
+            vcf_cols = vcfdf.df.columns.tolist()
+            vcfdf.df = vcfdf.df.merge(
+                df_cl[[*vcf_cols, 'CL_FILTER']], on=vcf_cols, how='left'
             ).assign(
-                FILTER=lambda d: d['FILTER'].mask(
-                    d['CL_FILTER'] == self.__fl, d['FILTER'] + ';' + self.__fl
-                ).str.replace(r'PASS;', '')
+                FILTER=lambda d:
+                np.where(d['CL_FILTER'].isna(), d['FILTER'], d['CL_FILTER'])
             )[vcf_cols]
             self.__logger.info(
                 'VariantGMMFilter filtered out variants: {0} / {1}'.format(
@@ -144,12 +144,12 @@ class VariantGMMFilter(object):
         ).assign(
             CL_ALTDP=lambda d: (d['CL_AF'] * d['CL_DP']),
         ).assign(
-            CL_FILTER=lambda d: np.where(
+            CL_FILTER=lambda d: d['FILTER'].mask(
                 (
                     (d['CL_AF'] < self.__cos['AF'])
                     | (d['CL_ALTDP'] < self.__cos['ALTDP'])
                 ),
-                self.__fl, d['FILTER']
+                (d['FILTER'] + ';' + self.__fl).str.replace(r'^PASS;', '')
             )
         )
         return df_cl
