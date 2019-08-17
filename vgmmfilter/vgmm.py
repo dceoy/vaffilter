@@ -16,49 +16,83 @@ from sklearn.mixture import GaussianMixture
 
 class VariantGMMFilter(object):
     def __init__(self, af_cutoff=0.02, altdp_cutoff=10, alpha_for_mvalue=1e-2,
-                 target_filtered_variants=None, filter_label='VGMM'):
+                 target_filtered_variants=None, filter_label='VGMM',
+                 min_sample_size=3, peakout_iter=5, gm_covariance_type='full',
+                 gm_tol=1e-4, gm_max_iter=1000):
         self.__logger = logging.getLogger(__name__)
-        self.__cos = {'AF': af_cutoff, 'ALTDP': altdp_cutoff}
-        self.__logger.debug('self.__cos: {}'.format(self.__cos))
-        self.__a4m = alpha_for_mvalue
+        self.__logger.debug(
+            'af_cutoff: {0}, altdp_cutoff: {1}'.format(af_cutoff, altdp_cutoff)
+        )
+        self.__af_co = af_cutoff
+        self.__altdp_co = altdp_cutoff
+        self.__mv_alpha = alpha_for_mvalue
         if not target_filtered_variants:
-            self.__tfv = None
+            self.__target_filtered_variants = None
         elif isinstance(target_filtered_variants, str):
-            self.__tfv = {target_filtered_variants}
+            self.__target_filtered_variants = {target_filtered_variants}
         else:
             assert isinstance(target_filtered_variants, (list, tuple, set))
-            self.__tfv = set(target_filtered_variants)
-        self.__fl = filter_label
+            self.__target_filtered_variants = set(target_filtered_variants)
+        self.__filter_label = filter_label
+        self.__min_sample_size = min_sample_size
+        self.__peakout_iter = peakout_iter
+        self.__gm_args = {
+            'covariance_type': gm_covariance_type, 'tol': gm_tol,
+            'max_iter': gm_max_iter
+        }
 
-    def run(self, vcfdf, out_fig_pdf_path=None, covariance_type='full',
-            peakout_iter=5):
+    def run(self, vcfdf, out_fig_pdf_path=None):
         self._validate_df_vcf(df=vcfdf.df)
         df_vcf = (
-            vcfdf.df.pipe(lambda d: d[d['FILTER'].isin(self.__tfv)])
-            if self.__tfv else vcfdf.df
+            vcfdf.df.pipe(
+                lambda d: d[d['FILTER'].isin(self.__target_filtered_variants)]
+            ) if self.__target_filtered_variants else vcfdf.df
         )
-        if df_vcf.size:
-            df_cl = self._cluster_variants(
-                df_xvcf=vcfdf.expanded_df(
-                    df=df_vcf, by_info=True, by_samples=False, drop=False
-                ),
-                covariance_type=covariance_type, peakout_iter=peakout_iter
+        sample_size = df_vcf.shape[0]
+        self.__logger.debug('sample_size: {}'.format(sample_size))
+        if sample_size:
+            df_xvcf = vcfdf.expanded_df(
+                df=df_vcf, by_info=True, by_samples=False, drop=False
+            )
+            df_cl = (
+                self._cluster_variants(df_xvcf=df_xvcf)
+                if sample_size >= self.__min_sample_size
+                else df_xvcf.assign(
+                    AF=lambda d: d['INFO_AF'].astype(float),
+                    DP=lambda d: d['INFO_DP'].astype(int),
+                    INDELLEN=lambda d:
+                    (d['ALT'].apply(len) - d['REF'].apply(len))
+                ).assign(
+                    ALTDP=lambda d: (d['AF'] * d['DP']),
+                    INSLEN=lambda d: d['INDELLEN'].clip(lower=0),
+                    DELLEN=lambda d: (-d['INDELLEN']).clip(lower=0)
+                ).assign(**{
+                    ('CL_' + k): (lambda d: d[k])
+                    for k in ['ALTDP', 'DP', 'AF', 'INSLEN', 'DELLEN']
+                })
+            ).assign(
+                is_filtered=lambda d: (
+                    (d['CL_AF'] < self.__af_co)
+                    | (d['CL_ALTDP'] < self.__altdp_co)
+                )
             )
             vcf_cols = vcfdf.df.columns.tolist()
             vcfdf.df = vcfdf.df.merge(
-                df_cl[[*vcf_cols, 'CL_FILTER']], on=vcf_cols, how='left'
+                df_cl[[*vcf_cols, 'is_filtered']], on=vcf_cols, how='left'
             ).assign(
-                FILTER=lambda d:
-                np.where(d['CL_FILTER'].isna(), d['FILTER'], d['CL_FILTER'])
+                is_filtered=lambda d: d['is_filtered'].fillna(False)
+            ).assign(
+                FILTER=lambda d: d['FILTER'].mask(
+                    d['is_filtered'],
+                    np.where(
+                        d['FILTER'] == 'PASS', self.__filter_label,
+                        d['FILTER'] + ';' + self.__filter_label
+                    )
+                )
             )[vcf_cols]
             self.__logger.info(
                 'VariantGMMFilter filtered out variants: {0} / {1}'.format(
-                    (
-                        df_cl['CL_FILTER'].value_counts().to_dict().get(
-                            self.__fl
-                        ) or 0
-                    ),
-                    df_vcf.shape[0]
+                    df_cl['is_filtered'].sum(), df_vcf.shape[0]
                 )
             )
             if out_fig_pdf_path:
@@ -66,7 +100,9 @@ class VariantGMMFilter(object):
             else:
                 pass
         else:
-            self.__logger.info('No variant targeted for {}.'.format(self.__fl))
+            self.__logger.info(
+                'No variant targeted for {}.'.format(self.__filter_label)
+            )
         return vcfdf
 
     @staticmethod
@@ -77,8 +113,7 @@ class VariantGMMFilter(object):
         elif ra[ra.str.contains(r'[^a-zA-Z]')].size:
             raise ValueError('invalid allele pattern')
 
-    def _cluster_variants(self, df_xvcf, covariance_type='full', tol=1e-4,
-                          max_iter=1000, peakout_iter=5):
+    def _cluster_variants(self, df_xvcf):
         axes = ['M_AF', 'LOG2_DP', 'LOG2_INSLEN', 'LOG2_DELLEN']
         df_x = df_xvcf.assign(
             AF=lambda d: d['INFO_AF'].astype(float),
@@ -90,7 +125,7 @@ class VariantGMMFilter(object):
             DELLEN=lambda d: (-d['INDELLEN']).clip(lower=0)
         ).assign(
             M_AF=lambda d: self._af2mvalue(
-                af=d['AF'], dp=d['DP'], alpha=self.__a4m
+                af=d['AF'], dp=d['DP'], alpha=self.__mv_alpha
             ),
             LOG2_DP=lambda d: np.log2(d['DP'] + 1),
             LOG2_INSLEN=lambda d: np.log2(d['INSLEN'] + 1),
@@ -107,16 +142,13 @@ class VariantGMMFilter(object):
         self.__logger.debug('x_train:{0}{1}'.format(os.linesep, x_train))
         best_gmm_dict = dict()
         for k in range(1, x_train.shape[0]):
-            gmm = GaussianMixture(
-                n_components=k, covariance_type=covariance_type, tol=tol,
-                max_iter=max_iter
-            )
+            gmm = GaussianMixture(n_components=k, **self.__gm_args)
             gmm.fit(X=x_train)
             bic = gmm.bic(X=x_train)
             self.__logger.debug('k: {0}, bic: {1}'.format(k, bic))
             if not best_gmm_dict or bic < best_gmm_dict['bic']:
                 best_gmm_dict = {'k': k, 'bic': bic, 'gmm': gmm}
-            elif k >= (best_gmm_dict['k'] + peakout_iter):
+            elif k >= (best_gmm_dict['k'] + self.__peakout_iter):
                 break
         best_gmm = best_gmm_dict['gmm']
         self.__logger.debug('best_gmm:{0}{1}'.format(os.linesep, best_gmm))
@@ -139,18 +171,10 @@ class VariantGMMFilter(object):
             CL_DELLEN=lambda d: (np.exp2(d['CL_LOG2_DELLEN']) - 1)
         ).assign(
             CL_AF=lambda d: self._mvalue2af(
-                mvalue=d['CL_M_AF'], dp=d['CL_DP'], alpha=self.__a4m
+                mvalue=d['CL_M_AF'], dp=d['CL_DP'], alpha=self.__mv_alpha
             )
         ).assign(
-            CL_ALTDP=lambda d: (d['CL_AF'] * d['CL_DP']),
-        ).assign(
-            CL_FILTER=lambda d: d['FILTER'].mask(
-                (
-                    (d['CL_AF'] < self.__cos['AF'])
-                    | (d['CL_ALTDP'] < self.__cos['ALTDP'])
-                ),
-                (d['FILTER'] + ';' + self.__fl).str.replace(r'^PASS;', '')
-            )
+            CL_ALTDP=lambda d: (d['CL_AF'] * d['CL_DP'])
         )
         return df_cl
 
