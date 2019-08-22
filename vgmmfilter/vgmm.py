@@ -18,7 +18,7 @@ class VariantGMMFilter(object):
     def __init__(self, af_cutoff=0.02, altdp_cutoff=10, alpha_for_mvalue=1e-2,
                  target_filtered_variants=None, filter_label='VGMM',
                  min_sample_size=3, peakout_iter=5, gm_covariance_type='full',
-                 gm_tol=1e-4, gm_max_iter=1000):
+                 gm_tol=1e-4, gm_max_iter=1000, font_family=None):
         self.__logger = logging.getLogger(__name__)
         self.__logger.debug(
             'af_cutoff: {0}, altdp_cutoff: {1}'.format(af_cutoff, altdp_cutoff)
@@ -40,6 +40,7 @@ class VariantGMMFilter(object):
             'covariance_type': gm_covariance_type, 'tol': gm_tol,
             'max_iter': gm_max_iter
         }
+        self.__font_family = font_family
 
     def run(self, vcfdf, out_fig_pdf_path=None):
         self._validate_df_vcf(df=vcfdf.df)
@@ -190,6 +191,8 @@ class VariantGMMFilter(object):
 
     def _draw_fig(self, df, out_fig_path):
         self.__logger.info('Draw a fig: {}'.format(out_fig_path))
+        if self.__font_family:
+            rcParams['font.family'] = self.__font_family
         rcParams['figure.figsize'] = (11.88, 8.40)  # A4 aspect: (297x210)
         sns.set(style='ticks', color_codes=True)
         sns.set_context('paper')
