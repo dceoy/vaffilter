@@ -64,12 +64,10 @@ class VariantGMMFilter(object):
                     INDELLEN=lambda d:
                     (d['ALT'].apply(len) - d['REF'].apply(len))
                 ).assign(
-                    ALTDP=lambda d: (d['AF'] * d['DP']),
-                    INSLEN=lambda d: d['INDELLEN'].clip(lower=0),
-                    DELLEN=lambda d: (-d['INDELLEN']).clip(lower=0)
+                    ALTDP=lambda d: (d['AF'] * d['DP'])
                 ).assign(**{
                     ('CL_' + k): (lambda d: d[k])
-                    for k in ['ALTDP', 'DP', 'AF', 'INSLEN', 'DELLEN']
+                    for k in ['ALTDP', 'DP', 'AF']
                 })
             ).assign(
                 is_filtered=lambda d: (
@@ -115,30 +113,21 @@ class VariantGMMFilter(object):
             raise ValueError('invalid allele pattern')
 
     def _cluster_variants(self, df_xvcf):
-        axes = ['M_AF', 'LOG2_DP', 'LOG2_INSLEN', 'LOG2_DELLEN']
+        axes = ['M_AF', 'LOG2_DP']
         df_x = df_xvcf.assign(
             AF=lambda d: d['INFO_AF'].astype(float),
             DP=lambda d: d['INFO_DP'].astype(int),
             INDELLEN=lambda d: (d['ALT'].apply(len) - d['REF'].apply(len))
         ).assign(
-            ALTDP=lambda d: (d['AF'] * d['DP']),
-            INSLEN=lambda d: d['INDELLEN'].clip(lower=0),
-            DELLEN=lambda d: (-d['INDELLEN']).clip(lower=0)
+            ALTDP=lambda d: (d['AF'] * d['DP'])
         ).assign(
             M_AF=lambda d: self._af2mvalue(
                 af=d['AF'], dp=d['DP'], alpha=self.__mv_alpha
             ),
-            LOG2_DP=lambda d: np.log2(d['DP'] + 1),
-            LOG2_INSLEN=lambda d: np.log2(d['INSLEN'] + 1),
-            LOG2_DELLEN=lambda d: np.log2(d['DELLEN'] + 1)
+            LOG2_DP=lambda d: np.log2(d['DP'] + 1)
         )
         self.__logger.debug('df_x:{0}{1}'.format(os.linesep, df_x))
-        rvn = ReversibleNormalizer(
-            df=df_x,
-            columns=df_x[axes].pipe(
-                lambda d: d.columns[d.nunique() > 1].tolist()
-            )
-        )
+        rvn = ReversibleNormalizer(df=df_x, columns=axes)
         x_train = rvn.normalized_df[rvn.columns]
         self.__logger.debug('x_train:{0}{1}'.format(os.linesep, x_train))
         best_gmm_dict = dict()
@@ -167,9 +156,7 @@ class VariantGMMFilter(object):
             ),
             on='CL_INT', how='left'
         ).assign(
-            CL_DP=lambda d: (np.exp2(d['CL_LOG2_DP']) - 1),
-            CL_INSLEN=lambda d: (np.exp2(d['CL_LOG2_INSLEN']) - 1),
-            CL_DELLEN=lambda d: (np.exp2(d['CL_LOG2_DELLEN']) - 1)
+            CL_DP=lambda d: (np.exp2(d['CL_LOG2_DP']) - 1)
         ).assign(
             CL_AF=lambda d: self._mvalue2af(
                 mvalue=d['CL_M_AF'], dp=d['CL_DP'], alpha=self.__mv_alpha
@@ -199,12 +186,8 @@ class VariantGMMFilter(object):
         df_fig = df.sort_values(
             'CL_AF', ascending=False
         ).assign(
-            CL=lambda d: d[[
-                'CL_ALTDP', 'CL_DP', 'CL_AF', 'CL_INSLEN', 'CL_DELLEN'
-            ]].apply(
-                lambda r:
-                '[{0:.1f}/{1:.1f}, {2:.4f}, {3:.2f}, {4:.2f}]'.format(*r),
-                axis=1
+            CL=lambda d: d[['CL_ALTDP', 'CL_DP', 'CL_AF']].apply(
+                lambda r: '[{0:.1f}/{1:.1f}, {2:.4f}]'.format(*r), axis=1
             ),
             VT=lambda d: np.where(
                 d['INDELLEN'] > 0, 'Insertion',
