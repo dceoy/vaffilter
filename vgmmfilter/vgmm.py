@@ -71,8 +71,11 @@ class VariantGMMFilter(object):
                 })
             ).assign(
                 is_filtered=lambda d: (
-                    (d['CL_AF'] < self.__af_co)
-                    | (d['CL_ALTDP'] < self.__altdp_co)
+                    (
+                        (d['CL_AF'] < self.__af_co)
+                        | (d['CL_ALTDP'] < self.__altdp_co)
+                    ) if self.__altdp_co
+                    else (d['CL_AF'] < self.__af_co)
                 )
             )
             vcf_cols = vcfdf.df.columns.tolist()

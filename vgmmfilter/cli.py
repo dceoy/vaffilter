@@ -11,7 +11,7 @@ Usage:
 Options:
     --debug, --info       Execute a command with debug|info messages
     --af-cutoff=<float>   Set AF cutoff for GMM clusters [default: 0.02]
-    --altdp-cutoff=<int>  Set ALT depth cutoff for GMM clusters [default: 8]
+    --altdp-cutoff=<int>  Set ALT depth cutoff for GMM clusters
     --target-pass         Target only passing variants in a VCF file
     --seed=<int>          Set random seed
     --fig-pdf=<path>      Write a figure into a PDF file
