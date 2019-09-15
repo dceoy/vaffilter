@@ -65,10 +65,11 @@ class VariantGMMFilter(object):
                     (d['ALT'].apply(len) - d['REF'].apply(len))
                 ).assign(
                     ALTDP=lambda d: (d['AF'] * d['DP'])
-                ).assign(**{
-                    ('CL_' + k): (lambda d: d[k])
-                    for k in ['ALTDP', 'DP', 'AF']
-                })
+                ).assign(
+                    CL_AF=lambda d: d['AF'],
+                    CL_DP=lambda d: d['DP'],
+                    CL_ALTDP=lambda d: d['ALTDP']
+                )
             ).assign(
                 is_filtered=lambda d: (
                     (
