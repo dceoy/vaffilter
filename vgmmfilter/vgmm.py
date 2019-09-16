@@ -135,7 +135,7 @@ class VariantGMMFilter(object):
         x_train = rvn.normalized_df[rvn.columns]
         self.__logger.debug('x_train:{0}{1}'.format(os.linesep, x_train))
         best_gmm_dict = dict()
-        for k in range((x_train.shape[0] - 1), 1, -1):
+        for k in range(2, x_train.shape[0]):
             gmm = GaussianMixture(n_components=k, **self.__gm_args)
             gmm.fit(X=x_train)
             bic = gmm.bic(X=x_train)
