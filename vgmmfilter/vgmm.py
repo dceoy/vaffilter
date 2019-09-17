@@ -15,12 +15,15 @@ from sklearn.mixture import GaussianMixture
 
 
 class VariantGMMFilter(object):
-    def __init__(self, af_cutoff=0.02, alpha_for_mvalue=1e-2,
-                 target_filtered_variants=None, filter_label='VGMM',
-                 min_sample_size=3, peakout_iter=10, gm_covariance_type='full',
-                 gm_tol=1e-4, gm_max_iter=1000, font_family=None):
+    def __init__(self, af_cutoff=0.02, min_salvaged_af=0.2,
+                 alpha_for_mvalue=1e-2, target_filtered_variants=None,
+                 filter_label='VGMM', min_sample_size=3, peakout_iter=10,
+                 gm_covariance_type='full', gm_tol=1e-4, gm_max_iter=1000,
+                 font_family=None):
         self.__logger = logging.getLogger(__name__)
         self.__af_cutoff = af_cutoff
+        assert (not min_salvaged_af) or (min_salvaged_af > af_cutoff)
+        self.__min_salvaged_af = min_salvaged_af or 1
         self.__mv_alpha = alpha_for_mvalue
         if not target_filtered_variants:
             self.__target_filtered_variants = None
@@ -51,10 +54,10 @@ class VariantGMMFilter(object):
             df_xvcf = vcfdf.expanded_df(
                 df=df_vcf, by_info=True, by_samples=False, drop=False
             )
-            df_cl = (
-                self._cluster_variants(df_xvcf=df_xvcf)
-                if sample_size >= self.__min_sample_size
-                else df_xvcf.assign(
+            if sample_size >= self.__min_sample_size:
+                df_cl = self._cluster_variants(df_xvcf=df_xvcf)
+            else:
+                df_cl = df_xvcf.assign(
                     AF=lambda d: d['INFO_AF'].astype(float),
                     DP=lambda d: d['INFO_DP'].astype(int),
                     INDELLEN=lambda d:
@@ -65,18 +68,17 @@ class VariantGMMFilter(object):
                     CL_AF=lambda d: d['AF'],
                     CL_DP=lambda d: d['DP'],
                     CL_ALTDP=lambda d: d['ALTDP']
+                ).assign(
+                    dropped=lambda d: (d['CL_AF'] < self.__af_cutoff)
                 )
-            ).assign(
-                is_filtered=lambda d: (d['CL_AF'] < self.__af_cutoff)
-            )
             vcf_cols = vcfdf.df.columns.tolist()
             vcfdf.df = vcfdf.df.merge(
-                df_cl[[*vcf_cols, 'is_filtered']], on=vcf_cols, how='left'
+                df_cl[[*vcf_cols, 'dropped']], on=vcf_cols, how='left'
             ).assign(
-                is_filtered=lambda d: d['is_filtered'].fillna(False)
+                dropped=lambda d: d['dropped'].fillna(False)
             ).assign(
                 FILTER=lambda d: d['FILTER'].mask(
-                    d['is_filtered'],
+                    d['dropped'],
                     np.where(
                         d['FILTER'] == 'PASS', self.__filter_label,
                         d['FILTER'] + ';' + self.__filter_label
@@ -85,7 +87,7 @@ class VariantGMMFilter(object):
             )[vcf_cols]
             self.__logger.info(
                 'VariantGMMFilter filtered out variants: {0} / {1}'.format(
-                    df_cl['is_filtered'].sum(), df_vcf.shape[0]
+                    df_cl['dropped'].sum(), df_vcf.shape[0]
                 )
             )
             if out_fig_pdf_path:
@@ -107,7 +109,7 @@ class VariantGMMFilter(object):
             raise ValueError('invalid allele pattern')
 
     def _cluster_variants(self, df_xvcf):
-        axes = ['M_AF', 'LOG2_DP']
+        n_variants = df_xvcf.shape[0]
         df_x = df_xvcf.assign(
             AF=lambda d: d['INFO_AF'].astype(float),
             DP=lambda d: d['INFO_DP'].astype(int),
@@ -121,36 +123,38 @@ class VariantGMMFilter(object):
             LOG2_DP=lambda d: np.log2(d['DP'])
         )
         self.__logger.debug('df_x:{0}{1}'.format(os.linesep, df_x))
-        rvn = ReversibleNormalizer(df=df_x, columns=axes)
-        x_train = rvn.normalized_df[rvn.columns]
-        self.__logger.debug('x_train:{0}{1}'.format(os.linesep, x_train))
+        rvn = ReversibleNormalizer(df=df_x, columns=['M_AF', 'LOG2_DP'])
         best_gmm_dict = dict()
-        for k in range(2, x_train.shape[0]):
-            gmm = GaussianMixture(n_components=k, **self.__gm_args)
-            gmm.fit(X=x_train)
-            bic = gmm.bic(X=x_train)
-            self.__logger.debug('k: {0}, bic: {1}'.format(k, bic))
-            if not best_gmm_dict or bic < best_gmm_dict['bic']:
-                best_gmm_dict = {'k': k, 'bic': bic, 'gmm': gmm}
-            elif k >= (best_gmm_dict['k'] + self.__peakout_iter):
+        for k in range(2, (n_variants + 1)):
+            r = self._perform_gmm(rvn=rvn, k=k)
+            if (r['max_dropped_af'] < self.__min_salvaged_af
+                    and (not best_gmm_dict
+                         or r['bic'] < best_gmm_dict['bic'])):
+                best_gmm_dict = r
+            elif (best_gmm_dict
+                  and k >= (best_gmm_dict['k'] + self.__peakout_iter)):
                 break
-        best_gmm = best_gmm_dict['gmm']
-        self.__logger.debug('best_gmm:{0}{1}'.format(os.linesep, best_gmm))
+        assert bool(best_gmm_dict)
+        self.__logger.debug(
+            'the best model:{0}{1}{0}{2}'.format(
+                os.linesep, best_gmm_dict['gmm'], best_gmm_dict['df_gmm_mu']
+            )
+        )
+        return best_gmm_dict['df_variants']
+
+    def _perform_gmm(self, rvn, k):
+        gmm = GaussianMixture(n_components=k, **self.__gm_args)
+        x_train = rvn.normalized_df[rvn.columns]
+        gmm.fit(X=x_train)
+        bic = gmm.bic(X=x_train)
         df_gmm_mu = rvn.denormalize(
-            df=pd.DataFrame(best_gmm.means_, columns=x_train.columns)
+            df=pd.DataFrame(gmm.means_, columns=rvn.columns)
+        ).reset_index().rename(
+            columns={
+                'index': 'CL_INT', 'M_AF': 'CL_M_AF', 'LOG2_DP': 'CL_LOG2_DP'
+            }
         ).assign(
-            **{c: df_x[c].iloc[0] for c in axes}
-        )[axes]
-        self.__logger.debug('df_gmm_mu:{0}{1}'.format(os.linesep, df_gmm_mu))
-        df_cl = rvn.df.assign(
-            CL_INT=best_gmm.predict(X=x_train)
-        ).merge(
-            df_gmm_mu.reset_index().rename(
-                columns={'index': 'CL_INT', **{k: ('CL_' + k) for k in axes}}
-            ),
-            on='CL_INT', how='left'
-        ).assign(
-            CL_DP=lambda d: (np.exp2(d['CL_LOG2_DP']) - 1)
+            CL_DP=lambda d: np.exp2(d['CL_LOG2_DP'])
         ).assign(
             CL_AF=lambda d: self._mvalue2af(
                 mvalue=d['CL_M_AF'], dp=d['CL_DP'], alpha=self.__mv_alpha
@@ -158,7 +162,26 @@ class VariantGMMFilter(object):
         ).assign(
             CL_ALTDP=lambda d: (d['CL_AF'] * d['CL_DP'])
         )
-        return df_cl
+        df_variants = pd.merge(
+            rvn.df.assign(CL_INT=gmm.predict(X=x_train)),
+            df_gmm_mu[['CL_INT', 'CL_AF', 'CL_DP', 'CL_ALTDP']],
+            on='CL_INT', how='left'
+        ).assign(
+            dropped=lambda d: (d['CL_AF'] < self.__af_cutoff)
+        )
+        max_dropped_af = df_variants.pipe(
+            lambda d:
+            (d[d['dropped']]['AF'].max() if d['dropped'].any() else 0)
+        )
+        self.__logger.debug(
+            'k: {0}, bic: {1}, max_dropped_af: {2}'.format(
+                k, bic, max_dropped_af
+            )
+        )
+        return {
+            'k': k, 'bic': bic, 'gmm': gmm, 'df_gmm_mu': df_gmm_mu,
+            'df_variants': df_variants, 'max_dropped_af': max_dropped_af
+        }
 
     @staticmethod
     def _af2mvalue(af, dp, alpha=0):
@@ -167,7 +190,7 @@ class VariantGMMFilter(object):
     @staticmethod
     def _mvalue2af(mvalue, dp, alpha=0):
         return (
-            lambda x: np.divide(((x * dp) - ((x - 1) * alpha)), ((x + 1) * dp))
+            lambda x: np.divide(((x * dp) + ((x - 1) * alpha)), ((x + 1) * dp))
         )(x=np.exp2(mvalue))
 
     def _draw_fig(self, df, out_fig_path):
