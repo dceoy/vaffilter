@@ -3,15 +3,14 @@
 GMM-based Infrequent Variant Filter for VCF data
 
 Usage:
-    vgmmfilter [--debug|--info] [--af-cutoff=<int>] [--altdp-cutoff=<int>]
-               [--target-pass] [--seed=<int>] [--fig-pdf=<path>] <src> [<dst>]
+    vgmmfilter [--debug|--info] [--af-cutoff=<int>] [--target-pass]
+               [--seed=<int>] [--fig-pdf=<path>] <src> [<dst>]
     vgmmfilter --version
     vgmmfilter -h|--help
 
 Options:
     --debug, --info       Execute a command with debug|info messages
     --af-cutoff=<float>   Set AF cutoff for GMM clusters [default: 0.02]
-    --altdp-cutoff=<int>  Set ALT depth cutoff for GMM clusters
     --target-pass         Target only passing variants in a VCF file
     --seed=<int>          Set random seed
     --fig-pdf=<path>      Write a figure into a PDF file
@@ -45,7 +44,6 @@ def main():
     _vgmm_filter(
         in_vcf_path=args['<src>'], out_vcf_path=args['<dst>'],
         out_fig_pdf_path=args['--fig-pdf'], af_cutoff=args['--af-cutoff'],
-        altdp_cutoff=args['--altdp-cutoff'],
         target_pass=args['--target-pass']
     )
 
@@ -64,14 +62,14 @@ def _set_log_config(debug=None, info=None):
 
 
 def _vgmm_filter(in_vcf_path, out_vcf_path, out_fig_pdf_path, af_cutoff,
-                 altdp_cutoff, target_pass):
+                 target_pass):
     logger = logging.getLogger(__name__)
     logger.info('Execute VariantGMMFilter: {}'.format(in_vcf_path))
     signal.signal(signal.SIGINT, signal.SIG_DFL)
     vcfdf = VcfDataFrame(path=in_vcf_path)
     logger.debug('Execute Variant GMM Filter.')
     vgmmf = VariantGMMFilter(
-        af_cutoff=float(af_cutoff), altdp_cutoff=float(altdp_cutoff),
+        af_cutoff=float(af_cutoff),
         target_filtered_variants=('PASS' if target_pass else None)
     )
     vcfdf = vgmmf.run(vcfdf=vcfdf, out_fig_pdf_path=out_fig_pdf_path)

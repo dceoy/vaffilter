@@ -15,16 +15,12 @@ from sklearn.mixture import GaussianMixture
 
 
 class VariantGMMFilter(object):
-    def __init__(self, af_cutoff=0.02, altdp_cutoff=10, alpha_for_mvalue=1e-2,
+    def __init__(self, af_cutoff=0.02, alpha_for_mvalue=1e-2,
                  target_filtered_variants=None, filter_label='VGMM',
                  min_sample_size=3, peakout_iter=10, gm_covariance_type='full',
                  gm_tol=1e-4, gm_max_iter=1000, font_family=None):
         self.__logger = logging.getLogger(__name__)
-        self.__logger.debug(
-            'af_cutoff: {0}, altdp_cutoff: {1}'.format(af_cutoff, altdp_cutoff)
-        )
-        self.__af_co = af_cutoff
-        self.__altdp_co = altdp_cutoff
+        self.__af_cutoff = af_cutoff
         self.__mv_alpha = alpha_for_mvalue
         if not target_filtered_variants:
             self.__target_filtered_variants = None
@@ -71,13 +67,7 @@ class VariantGMMFilter(object):
                     CL_ALTDP=lambda d: d['ALTDP']
                 )
             ).assign(
-                is_filtered=lambda d: (
-                    (
-                        (d['CL_AF'] < self.__af_co)
-                        | (d['CL_ALTDP'] < self.__altdp_co)
-                    ) if self.__altdp_co
-                    else (d['CL_AF'] < self.__af_co)
-                )
+                is_filtered=lambda d: (d['CL_AF'] < self.__af_cutoff)
             )
             vcf_cols = vcfdf.df.columns.tolist()
             vcfdf.df = vcfdf.df.merge(
@@ -128,7 +118,7 @@ class VariantGMMFilter(object):
             M_AF=lambda d: self._af2mvalue(
                 af=d['AF'], dp=d['DP'], alpha=self.__mv_alpha
             ),
-            LOG2_DP=lambda d: np.log2(d['DP'] + 1)
+            LOG2_DP=lambda d: np.log2(d['DP'])
         )
         self.__logger.debug('df_x:{0}{1}'.format(os.linesep, df_x))
         rvn = ReversibleNormalizer(df=df_x, columns=axes)
@@ -149,7 +139,7 @@ class VariantGMMFilter(object):
         df_gmm_mu = rvn.denormalize(
             df=pd.DataFrame(best_gmm.means_, columns=x_train.columns)
         ).assign(
-            **{c: df_x[c].iloc[0] for c in axes if c not in x_train.columns}
+            **{c: df_x[c].iloc[0] for c in axes}
         )[axes]
         self.__logger.debug('df_gmm_mu:{0}{1}'.format(os.linesep, df_gmm_mu))
         df_cl = rvn.df.assign(
@@ -244,7 +234,6 @@ class ReversibleNormalizer(object):
         self.normalized_df = self.normalize(df=self.df)
 
     def normalize(self, df):
-        np.seterr(divide='ignore')
         return df.pipe(
             lambda d: d[[c for c in d.columns if c not in self.columns]]
         ).join(
