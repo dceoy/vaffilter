@@ -12,7 +12,7 @@ Options:
     --debug, --info       Execute a command with debug|info messages
     --af-cutoff=<float>   Set AF cutoff for GMM clusters [default: 0.02]
     --min-salvaged-af=<float>
-                          Salvage variants of high AF
+                          Salvage variants of high AF [default: 0.2]
     --target-pass         Target only passing variants in a VCF file
     --seed=<int>          Set random seed
     --fig-pdf=<path>      Write a figure into a PDF file
