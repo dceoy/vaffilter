@@ -19,8 +19,7 @@ class VariantGMMFilter(object):
     def __init__(self, af_cutoff=0.02, min_salvaged_af=0.2,
                  alpha_for_mvalue=1e-2, target_filtered_variants=None,
                  filter_label='VGMM', min_sample_size=3, peakout_iter=5,
-                 model_iter=10, gm_covariance_type='full', gm_tol=1e-4,
-                 gm_max_iter=1000, font_family=None):
+                 model_iter=10, font_family=None, **kwargs):
         self.__logger = logging.getLogger(__name__)
         self.__af_cutoff = af_cutoff
         assert (not min_salvaged_af) or (min_salvaged_af > af_cutoff)
@@ -37,10 +36,7 @@ class VariantGMMFilter(object):
         self.__min_sample_size = min_sample_size
         self.__peakout_iter = peakout_iter
         self.__model_iter = model_iter
-        self.__gm_args = {
-            'covariance_type': gm_covariance_type, 'tol': gm_tol,
-            'max_iter': gm_max_iter
-        }
+        self.__gm_args = kwargs
         self.__font_family = font_family
 
     def run(self, vcfdf, out_fig_pdf_path=None):
@@ -128,11 +124,11 @@ class VariantGMMFilter(object):
         rvn = ReversibleNormalizer(df=df_x, columns=['M_AF', 'LOG2_DP'])
         best_gmm_dict = None
         for k in range(2, (n_variants + 1)):
-            model = self._perform_gmm(rvn=rvn, k=k)
-            if (model['max_dropped_af'] < self.__min_salvaged_af
+            gmm_dict = self._perform_gmm(rvn=rvn, k=k)
+            if (gmm_dict['max_dropped_af'] < self.__min_salvaged_af
                     and (not best_gmm_dict
-                         or model['bic'] < best_gmm_dict['bic'])):
-                best_gmm_dict = model
+                         or gmm_dict['bic'] < best_gmm_dict['bic'])):
+                best_gmm_dict = gmm_dict
             elif (best_gmm_dict
                   and k >= (best_gmm_dict['k'] + self.__peakout_iter)):
                 break
@@ -146,15 +142,15 @@ class VariantGMMFilter(object):
 
     def _perform_gmm(self, rvn, k):
         x_train = rvn.normalized_df[rvn.columns]
-        best_model = sorted(
+        best_model_of_k = sorted(
             [
-                self._gm_fit(x_train=x_train, n_components=k, **self.__gm_args)
+                self._gm_fit(x=x_train, n_components=k, **self.__gm_args)
                 for _ in range(self.__model_iter)
             ],
             key=operator.itemgetter('bic')
         )[0]
         df_gm_mu = rvn.denormalize(
-            df=pd.DataFrame(best_model['gmm'].means_, columns=rvn.columns)
+            df=pd.DataFrame(best_model_of_k['gmm'].means_, columns=rvn.columns)
         ).reset_index().rename(
             columns={
                 'index': 'CL_INT', 'M_AF': 'CL_M_AF', 'LOG2_DP': 'CL_LOG2_DP'
@@ -169,7 +165,7 @@ class VariantGMMFilter(object):
             CL_ALTDP=lambda d: (d['CL_AF'] * d['CL_DP'])
         )
         df_variants = pd.merge(
-            rvn.df.assign(CL_INT=best_model['gmm'].predict(X=x_train)),
+            rvn.df.assign(CL_INT=best_model_of_k['gmm'].predict(X=x_train)),
             df_gm_mu[['CL_INT', 'CL_AF', 'CL_DP', 'CL_ALTDP']],
             on='CL_INT', how='left'
         ).assign(
@@ -181,20 +177,20 @@ class VariantGMMFilter(object):
         )
         self.__logger.debug(
             'k: {0}, bic: {1}, max_dropped_af: {2}'.format(
-                k, best_model['bic'], max_dropped_af
+                k, best_model_of_k['bic'], max_dropped_af
             )
         )
         return {
-            'k': k, 'bic': best_model['bic'], 'gmm': best_model['gmm'],
-            'df_gm_mu': df_gm_mu, 'df_variants': df_variants,
-            'max_dropped_af': max_dropped_af
+            'k': k, 'bic': best_model_of_k['bic'],
+            'gmm': best_model_of_k['gmm'], 'df_gm_mu': df_gm_mu,
+            'df_variants': df_variants, 'max_dropped_af': max_dropped_af
         }
 
     @staticmethod
-    def _gm_fit(x_train, **kwargs):
+    def _gm_fit(x, **kwargs):
         gmm = GaussianMixture(**kwargs)
-        gmm.fit(X=x_train)
-        return {'bic': gmm.bic(X=x_train), 'gmm': gmm}
+        gmm.fit(X=x)
+        return {'bic': gmm.bic(X=x), 'gmm': gmm}
 
     @staticmethod
     def _af2mvalue(af, dp, alpha=0):
