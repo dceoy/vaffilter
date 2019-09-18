@@ -4,6 +4,7 @@ https://github.com/dceoy/vgmmfilter
 """
 
 import logging
+import operator
 import os
 
 import matplotlib.pyplot as plt
@@ -17,9 +18,9 @@ from sklearn.mixture import GaussianMixture
 class VariantGMMFilter(object):
     def __init__(self, af_cutoff=0.02, min_salvaged_af=0.2,
                  alpha_for_mvalue=1e-2, target_filtered_variants=None,
-                 filter_label='VGMM', min_sample_size=3, peakout_iter=10,
-                 gm_covariance_type='full', gm_tol=1e-4, gm_max_iter=1000,
-                 font_family=None):
+                 filter_label='VGMM', min_sample_size=3, peakout_iter=5,
+                 model_iter=10, gm_covariance_type='full', gm_tol=1e-4,
+                 gm_max_iter=1000, font_family=None):
         self.__logger = logging.getLogger(__name__)
         self.__af_cutoff = af_cutoff
         assert (not min_salvaged_af) or (min_salvaged_af > af_cutoff)
@@ -35,6 +36,7 @@ class VariantGMMFilter(object):
         self.__filter_label = filter_label
         self.__min_sample_size = min_sample_size
         self.__peakout_iter = peakout_iter
+        self.__model_iter = model_iter
         self.__gm_args = {
             'covariance_type': gm_covariance_type, 'tol': gm_tol,
             'max_iter': gm_max_iter
@@ -124,13 +126,19 @@ class VariantGMMFilter(object):
         )
         self.__logger.debug('df_x:{0}{1}'.format(os.linesep, df_x))
         rvn = ReversibleNormalizer(df=df_x, columns=['M_AF', 'LOG2_DP'])
-        best_gmm_dict = dict()
+        best_gmm_dict = None
         for k in range(2, (n_variants + 1)):
-            r = self._perform_gmm(rvn=rvn, k=k)
-            if (r['max_dropped_af'] < self.__min_salvaged_af
+            model = sorted(
+                [
+                    self._perform_gmm(rvn=rvn, k=k)
+                    for _ in range(self.__model_iter)
+                ],
+                key=operator.itemgetter('bic')
+            )[0]
+            if (model['max_dropped_af'] < self.__min_salvaged_af
                     and (not best_gmm_dict
-                         or r['bic'] < best_gmm_dict['bic'])):
-                best_gmm_dict = r
+                         or model['bic'] < best_gmm_dict['bic'])):
+                best_gmm_dict = model
             elif (best_gmm_dict
                   and k >= (best_gmm_dict['k'] + self.__peakout_iter)):
                 break
