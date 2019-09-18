@@ -4,7 +4,8 @@ GMM-based Infrequent Variant Filter for VCF data
 
 Usage:
     vgmmfilter [--debug|--info] [--af-cutoff=<int>] [--min-salvaged-af=<float>]
-               [--target-pass] [--seed=<int>] [--fig-pdf=<path>] <src> [<dst>]
+               [--alpha-of-mvalue=<float>] [--target-pass] [--seed=<int>]
+               [--fig-pdf=<path>] <src> [<dst>]
     vgmmfilter --version
     vgmmfilter -h|--help
 
@@ -13,6 +14,8 @@ Options:
     --af-cutoff=<float>   Set AF cutoff for GMM clusters [default: 0.02]
     --min-salvaged-af=<float>
                           Salvage variants of high AF [default: 0.2]
+    --alpha-of-mvalue=<float>
+                          Specify alpha of M-value [default: 1]
     --target-pass         Target only passing variants in a VCF file
     --seed=<int>          Set random seed
     --fig-pdf=<path>      Write a figure into a PDF file
@@ -47,6 +50,7 @@ def main():
         in_vcf_path=args['<src>'], out_vcf_path=args['<dst>'],
         out_fig_pdf_path=args['--fig-pdf'], af_cutoff=args['--af-cutoff'],
         min_salvaged_af=args['--min-salvaged-af'],
+        alpha_of_mvalue=args['--alpha-of-mvalue'],
         target_pass=args['--target-pass']
     )
 
@@ -65,7 +69,7 @@ def _set_log_config(debug=None, info=None):
 
 
 def _vgmm_filter(in_vcf_path, out_vcf_path, out_fig_pdf_path, af_cutoff,
-                 min_salvaged_af, target_pass):
+                 min_salvaged_af, alpha_of_mvalue, target_pass):
     logger = logging.getLogger(__name__)
     logger.info('Execute VariantGMMFilter: {}'.format(in_vcf_path))
     signal.signal(signal.SIGINT, signal.SIG_DFL)
@@ -73,6 +77,7 @@ def _vgmm_filter(in_vcf_path, out_vcf_path, out_fig_pdf_path, af_cutoff,
     logger.debug('Execute Variant GMM Filter.')
     vgmmf = VariantGMMFilter(
         af_cutoff=float(af_cutoff), min_salvaged_af=float(min_salvaged_af),
+        alpha_of_mvalue=float(alpha_of_mvalue),
         target_filtered_variants=('PASS' if target_pass else None)
     )
     vcfdf = vgmmf.run(vcfdf=vcfdf, out_fig_pdf_path=out_fig_pdf_path)

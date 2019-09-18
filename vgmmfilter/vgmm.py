@@ -17,14 +17,14 @@ from sklearn.mixture import GaussianMixture
 
 class VariantGMMFilter(object):
     def __init__(self, af_cutoff=0.02, min_salvaged_af=0.2,
-                 alpha_for_mvalue=1e-2, target_filtered_variants=None,
+                 alpha_of_mvalue=1, target_filtered_variants=None,
                  filter_label='VGMM', min_sample_size=3, peakout_iter=5,
                  model_iter=10, font_family=None, **kwargs):
         self.__logger = logging.getLogger(__name__)
         self.__af_cutoff = af_cutoff
         assert (not min_salvaged_af) or (min_salvaged_af > af_cutoff)
         self.__min_salvaged_af = min_salvaged_af or 1
-        self.__mv_alpha = alpha_for_mvalue
+        self.__mv_alpha = alpha_of_mvalue
         if not target_filtered_variants:
             self.__target_filtered_variants = None
         elif isinstance(target_filtered_variants, str):
