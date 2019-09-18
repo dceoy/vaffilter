@@ -128,13 +128,7 @@ class VariantGMMFilter(object):
         rvn = ReversibleNormalizer(df=df_x, columns=['M_AF', 'LOG2_DP'])
         best_gmm_dict = None
         for k in range(2, (n_variants + 1)):
-            model = sorted(
-                [
-                    self._perform_gmm(rvn=rvn, k=k)
-                    for _ in range(self.__model_iter)
-                ],
-                key=operator.itemgetter('bic')
-            )[0]
+            model = self._perform_gmm(rvn=rvn, k=k)
             if (model['max_dropped_af'] < self.__min_salvaged_af
                     and (not best_gmm_dict
                          or model['bic'] < best_gmm_dict['bic'])):
@@ -145,18 +139,22 @@ class VariantGMMFilter(object):
         assert bool(best_gmm_dict)
         self.__logger.debug(
             'the best model:{0}{1}{0}{2}'.format(
-                os.linesep, best_gmm_dict['gmm'], best_gmm_dict['df_gmm_mu']
+                os.linesep, best_gmm_dict['gmm'], best_gmm_dict['df_gm_mu']
             )
         )
         return best_gmm_dict['df_variants']
 
     def _perform_gmm(self, rvn, k):
-        gmm = GaussianMixture(n_components=k, **self.__gm_args)
         x_train = rvn.normalized_df[rvn.columns]
-        gmm.fit(X=x_train)
-        bic = gmm.bic(X=x_train)
-        df_gmm_mu = rvn.denormalize(
-            df=pd.DataFrame(gmm.means_, columns=rvn.columns)
+        best_model = sorted(
+            [
+                self._gm_fit(x_train=x_train, n_components=k, **self.__gm_args)
+                for _ in range(self.__model_iter)
+            ],
+            key=operator.itemgetter('bic')
+        )[0]
+        df_gm_mu = rvn.denormalize(
+            df=pd.DataFrame(best_model['gmm'].means_, columns=rvn.columns)
         ).reset_index().rename(
             columns={
                 'index': 'CL_INT', 'M_AF': 'CL_M_AF', 'LOG2_DP': 'CL_LOG2_DP'
@@ -171,8 +169,8 @@ class VariantGMMFilter(object):
             CL_ALTDP=lambda d: (d['CL_AF'] * d['CL_DP'])
         )
         df_variants = pd.merge(
-            rvn.df.assign(CL_INT=gmm.predict(X=x_train)),
-            df_gmm_mu[['CL_INT', 'CL_AF', 'CL_DP', 'CL_ALTDP']],
+            rvn.df.assign(CL_INT=best_model['gmm'].predict(X=x_train)),
+            df_gm_mu[['CL_INT', 'CL_AF', 'CL_DP', 'CL_ALTDP']],
             on='CL_INT', how='left'
         ).assign(
             dropped=lambda d: (d['CL_AF'] < self.__af_cutoff)
@@ -183,13 +181,20 @@ class VariantGMMFilter(object):
         )
         self.__logger.debug(
             'k: {0}, bic: {1}, max_dropped_af: {2}'.format(
-                k, bic, max_dropped_af
+                k, best_model['bic'], max_dropped_af
             )
         )
         return {
-            'k': k, 'bic': bic, 'gmm': gmm, 'df_gmm_mu': df_gmm_mu,
-            'df_variants': df_variants, 'max_dropped_af': max_dropped_af
+            'k': k, 'bic': best_model['bic'], 'gmm': best_model['gmm'],
+            'df_gm_mu': df_gm_mu, 'df_variants': df_variants,
+            'max_dropped_af': max_dropped_af
         }
+
+    @staticmethod
+    def _gm_fit(x_train, **kwargs):
+        gmm = GaussianMixture(**kwargs)
+        gmm.fit(X=x_train)
+        return {'bic': gmm.bic(X=x_train), 'gmm': gmm}
 
     @staticmethod
     def _af2mvalue(af, dp, alpha=0):
