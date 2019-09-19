@@ -118,7 +118,7 @@ class VariantGMMFilter(object):
             M_AF=lambda d: self._af2mvalue(
                 af=d['AF'], dp=d['DP'], alpha=self.__mv_alpha
             ),
-            LOG2_DP=lambda d: np.log2(d['DP'])
+            LOG2_DP=lambda d: np.log2(d['DP'] + self.__mv_alpha)
         )
         self.__logger.debug('df_x:{0}{1}'.format(os.linesep, df_x))
         rvn = ReversibleNormalizer(df=df_x, columns=['M_AF', 'LOG2_DP'])
@@ -156,7 +156,7 @@ class VariantGMMFilter(object):
                 'index': 'CL_INT', 'M_AF': 'CL_M_AF', 'LOG2_DP': 'CL_LOG2_DP'
             }
         ).assign(
-            CL_DP=lambda d: np.exp2(d['CL_LOG2_DP'])
+            CL_DP=lambda d: (np.exp2(d['CL_LOG2_DP']) - self.__mv_alpha)
         ).assign(
             CL_AF=lambda d: self._mvalue2af(
                 mvalue=d['CL_M_AF'], dp=d['CL_DP'], alpha=self.__mv_alpha
