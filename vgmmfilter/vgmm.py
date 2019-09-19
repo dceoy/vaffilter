@@ -116,12 +116,12 @@ class VariantGMMFilter(object):
             ALTDP=lambda d: (d['AF'] * d['DP'])
         ).assign(
             M_AF=lambda d: self._af2mvalue(
-                af=d['AF'], dp=d['DP'], alpha=self.__mv_alpha
+                af=d['AF'], altdp=d['ALTDP'], alpha=self.__mv_alpha
             ),
-            LOG2_DP=lambda d: np.log2(d['DP'] + self.__mv_alpha)
+            LOG2_ALTDP=lambda d: np.log2(d['ALTDP'])
         )
         self.__logger.debug('df_x:{0}{1}'.format(os.linesep, df_x))
-        rvn = ReversibleNormalizer(df=df_x, columns=['M_AF', 'LOG2_DP'])
+        rvn = ReversibleNormalizer(df=df_x, columns=['M_AF', 'LOG2_ALTDP'])
         best_gmm_dict = None
         for k in range(2, (n_variants + 1)):
             gmm_dict = self._perform_gmm(rvn=rvn, k=k)
@@ -153,20 +153,21 @@ class VariantGMMFilter(object):
             df=pd.DataFrame(best_model_of_k['gmm'].means_, columns=rvn.columns)
         ).reset_index().rename(
             columns={
-                'index': 'CL_INT', 'M_AF': 'CL_M_AF', 'LOG2_DP': 'CL_LOG2_DP'
+                'index': 'CL_INT', 'M_AF': 'CL_M_AF',
+                'LOG2_ALTDP': 'CL_LOG2_ALTDP'
             }
         ).assign(
-            CL_DP=lambda d: (np.exp2(d['CL_LOG2_DP']) - self.__mv_alpha)
+            CL_ALTDP=lambda d: np.exp2(d['CL_LOG2_ALTDP'])
         ).assign(
             CL_AF=lambda d: self._mvalue2af(
-                mvalue=d['CL_M_AF'], dp=d['CL_DP'], alpha=self.__mv_alpha
+                mvalue=d['CL_M_AF'], altdp=d['CL_ALTDP'], alpha=self.__mv_alpha
             )
         ).assign(
-            CL_ALTDP=lambda d: (d['CL_AF'] * d['CL_DP'])
+            CL_DP=lambda d: np.divide(d['CL_ALTDP'], d['CL_AF'])
         )
         df_variants = pd.merge(
             rvn.df.assign(CL_INT=best_model_of_k['gmm'].predict(X=x_train)),
-            df_gm_mu[['CL_INT', 'CL_AF', 'CL_DP', 'CL_ALTDP']],
+            df_gm_mu[['CL_INT', 'CL_AF', 'CL_ALTDP', 'CL_DP']],
             on='CL_INT', how='left'
         ).assign(
             dropped=lambda d: (d['CL_AF'] < self.__af_cutoff)
@@ -193,13 +194,16 @@ class VariantGMMFilter(object):
         return {'bic': gmm.bic(X=x), 'gmm': gmm}
 
     @staticmethod
-    def _af2mvalue(af, dp, alpha=0):
-        return np.log2(np.divide((af * dp + alpha), ((1 - af) * dp + alpha)))
+    def _af2mvalue(af, altdp, alpha):
+        return np.log2(
+            np.divide((altdp + alpha), (np.divide(altdp, af) - altdp + alpha))
+        )
 
     @staticmethod
-    def _mvalue2af(mvalue, dp, alpha=0):
+    def _mvalue2af(mvalue, altdp, alpha):
         return (
-            lambda x: np.divide(((x * dp) + ((x - 1) * alpha)), ((x + 1) * dp))
+            lambda x:
+            np.divide((x * altdp), ((1 + x) * altdp + (1 - x) * alpha))
         )(x=np.exp2(mvalue))
 
     def _draw_fig(self, df, out_fig_path):
