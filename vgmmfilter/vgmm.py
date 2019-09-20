@@ -234,8 +234,7 @@ class VariantGMMFilter(object):
         }
         fig_lab_names = {
             'AF': 'ALT allele frequency (AF)', 'DP': 'Total read depth (DP)',
-            'CL': 'Estimated cluster [ALT/DP, AF, INS, DEL]',
-            'VT': 'Variant Type'
+            'CL': 'Cluster [ALT/DP, AF]', 'VT': 'Variant Type'
         }
         sns.set_palette(palette='GnBu_d', n_colors=df_fig['CL'].nunique())
         self.__logger.debug('df_fig:{0}{1}'.format(os.linesep, df_fig))
@@ -255,7 +254,7 @@ class VariantGMMFilter(object):
         )
         ax.set_xscale('log')
         ax.set_title('Variant GMM Clusters')
-        ax.legend(loc='center left', bbox_to_anchor=(1, 0.5), ncol=1)
+        ax.legend(loc='upper left', bbox_to_anchor=(1, 1), ncol=1)
         axp = ax.get_position()
         ax.set_position([axp.x0, axp.y0, axp.width * 0.75, axp.height])
         plt.savefig(out_fig_path)
