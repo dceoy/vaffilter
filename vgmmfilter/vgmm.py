@@ -45,7 +45,7 @@ class VariantGMMFilter(object):
             vcfdf.df.pipe(
                 lambda d: d[d['FILTER'].isin(self.__target_filtered_variants)]
             ) if self.__target_filtered_variants else vcfdf.df
-        )
+        ).drop_duplicates()
         sample_size = df_vcf.shape[0]
         self.__logger.debug('sample_size: {}'.format(sample_size))
         if sample_size:
