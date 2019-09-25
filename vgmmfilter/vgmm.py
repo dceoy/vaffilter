@@ -100,11 +100,12 @@ class VariantGMMFilter(object):
 
     @staticmethod
     def _validate_df_vcf(df):
-        ra = df[['REF', 'ALT']].apply(lambda r: ''.join(r), axis=1)
-        if ra[ra.str.contains(',')].size:
-            raise ValueError('multiple allele pattern is not supported.')
-        elif ra[ra.str.contains(r'[^a-zA-Z]')].size:
-            raise ValueError('invalid allele pattern')
+        if df.size:
+            ra = df[['REF', 'ALT']].apply(lambda r: ''.join(r), axis=1)
+            if ra[ra.str.contains(',')].size:
+                raise ValueError('multiple allele pattern is not supported.')
+            elif ra[ra.str.contains(r'[^a-zA-Z]')].size:
+                raise ValueError('invalid allele pattern')
 
     def _cluster_variants(self, df_xvcf):
         n_variants = df_xvcf.shape[0]
